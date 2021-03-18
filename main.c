@@ -4,6 +4,7 @@ void process(connectfd);
 void read_requesthdrs(rio_t *rp);
 void parse_url(char *url, char *filename);
 void serve_static(int connectfd, char *filename, size_t size);
+void client_error(int connectfd, char *cause, char *errCode, char *errMsg);
 
 int main(int argc, char **argv) {
     int listenfd, connectfd;
@@ -41,12 +42,16 @@ void process(connectfd) {
     printf("Requested filename is %s", filename);
 
     if(stat(filename, &sbuf)<0) {                   //将filename所指向的文件读入sbuf
-        printf("404", "file not found");
+        client_error(connectfd, filename, "404", "File not found.");
         return;
     }
 
     if((S_ISREG(sbuf.st_mode)&&(sbuf.st_mode & S_IXUSR))) {
         serve_static(connectfd, filename, sbuf.st_size);
+    }
+    else {
+        client_error(connectfd, filename, "403", "Permission not allowed.");
+        return;
     }
 }
 
@@ -96,4 +101,17 @@ void get_filetype(char *filename, char *filetype)
         strcpy(filetype, "image/jpeg");
     else
         strcpy(filetype, "text/plain");
+}
+
+void client_error(int connectfd, char *cause, char *errCode, char *errMsg) {
+    char buf[MAXBUF], body[MAXBUF];
+    sprintf(body, "<html><title>Error</title></head>" );
+    sprintf(body, "%s\n%s", errCode, errMsg);
+    sprintf(buf, "HTTP/1.0 %s %s\r\n", errno, errMsg);
+    Rio_writen(connectfd, buf, strlen(buf));
+    sprintf(buf, "Content-type: text/html\r\n");
+    Rio_writen(connectfd, buf, strlen(buf));
+    sprintf(buf, "Content-length: %d\r\n\r\n", (int)strlen(body));
+    Rio_writen(connectfd, buf, strlen(buf));
+    Rio_writen(connectfd, body, (int)strlen(body));
 }
