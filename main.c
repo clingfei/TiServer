@@ -38,8 +38,9 @@ void process(connectfd) {
 
     read_requesthdrs(&rio);                 //read requested head;
     parse_url(url, filename);               //get requested filename;
-    printf("the url is %s \n", url);
-    printf("Requested filename is %s", filename);
+    //printf("Requested file is %s", filename);
+    //printf("the url is %s \n", url);
+    //printf("Requested filename is %s", filename);
 
     if(stat(filename, &sbuf)<0) {                   //将filename所指向的文件读入sbuf
         client_error(connectfd, filename, "404", "File not found.");
@@ -66,11 +67,22 @@ void read_requesthdrs(rio_t *rp) {
 }
 
 void parse_url(char *url, char *filename) {
+    memset(filename, '\0', sizeof(filename));
     strcpy(filename, ".");
-    strcat(filename, url);
-    if (url[strlen(url)-1]=="/"){               //如果Url
-        strcat(filename, "index.html");
+    //strcpy(url, "/");
+    printf("url is %s", url);
+    if(strstr(url, "/favicon.ico")) {               //在访问根路径时会默认提交两次请求，一次为favicon.ico，将其屏蔽掉
+        return;
     }
+    if (url[strlen(url)-1]=='/'){               //如果Url为根路径
+        strcat(filename, "/index.html");
+    }
+    else {
+        strcat(filename, url);
+    }
+    printf("\n");
+    printf("filename is %s\n", filename);
+    printf("\n");
     return;
 }
 
