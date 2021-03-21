@@ -2,9 +2,12 @@
 
 void process(connectfd);
 void read_requesthdrs(rio_t *rp);
-void parse_url(char *url, char *filename);
+int parse_url(char *url, char *filename, char *cgiargs);
 void serve_static(int connectfd, char *filename, size_t size);
-void client_error(int connectfd, char *cause, char *errCode, char *errMsg);
+void client_error(int connectfd, char *errCode, char *errMsg);
+void read_post_headers(rio_t *rp);
+void serve_post(int connectfd, char *buf, size_t size);
+void receive(rio_t *rp, char *buf);
 
 int main(int argc, char **argv) {
     int listenfd, connectfd;
@@ -30,33 +33,91 @@ void process(connectfd) {
     rio_t rio;
     char buf[MAXLINE];
     char method[MAXLINE], url[MAXLINE], version[MAXLINE];
-    char filename[MAXLINE];
+    char filename[MAXLINE], cgiargs[MAXLINE];
+    int is_static;
 
     Rio_readinitb(&rio, connectfd);
     Rio_readlineb(&rio, buf, MAXLINE);
     sscanf(buf, "%s %s %s", method, url, version);
+    is_static = parse_url(url, filename, cgiargs);
+    if(is_static) {
+        if(!strcasecmp(method, "GET")) {
+            read_requesthdrs(&rio);                 //read requested head;
 
-    read_requesthdrs(&rio);                 //read requested head;
-    parse_url(url, filename);               //get requested filename;
-    //printf("Requested file is %s", filename);
-    //printf("the url is %s \n", url);
-    //printf("Requested filename is %s", filename);
+            if(stat(filename, &sbuf)<0) {                   //将filename所指向的文件读入sbuf
+                printf("%s", filename);
+                printf("testclient\n");
 
-    if(stat(filename, &sbuf)<0) {                   //将filename所指向的文件读入sbuf
-        client_error(connectfd, filename, "404", "File not found.");
-        return;
-    }
-
-    if((S_ISREG(sbuf.st_mode)&&(sbuf.st_mode & S_IXUSR))) {
-        serve_static(connectfd, filename, sbuf.st_size);
-    }
-    else {
-        client_error(connectfd, filename, "403", "Permission not allowed.");
-        return;
+                client_error(connectfd, "404", "File not found.");
+                printf("test client\r\n");
+                return;
+            }
+            printf("Ssss\n");
+            if (!(S_ISREG(sbuf.st_mode)) || !(S_IRUSR & sbuf.st_mode)) {
+                //clienterror(connectfd, filename, "403", "Tiny couldn't read the file");
+                return;
+            }
+            serve_static(connectfd, filename, sbuf.st_size);
+            return;
+        }
+        else if(!strcasecmp(method, "POST")) {
+            char buf[MAXBUF];
+            read_post_headers(&rio);
+            receive(&rio, buf);
+            serve_post(connectfd, buf, sizeof(buf));
+        }
+        else {
+            client_error(connectfd, "501", "Method not supported.");
+        }
     }
 }
 
+void read_post_headers(rio_t *rp) {
+    printf("Method: POST\r\n");
+    char buf[MAXLINE];
+    Rio_readlineb(rp, buf, MAXLINE);
+    while(strcmp(buf, "\r\n")){
+        Rio_readlineb(rp, buf, MAXLINE);
+        printf("%s", buf);
+    }
+
+    printf("test");
+
+    Rio_readlineb(rp, buf, MAXLINE);
+    //while(strcmp(buf, "\r\n")) {
+    //    Rio_readlineb(rp, buf, MAXLINE);
+    //    printf("%s", buf);
+    //}
+    //strcpy(buf, "ssss");
+    //Rio_writen(connectfd, buf, strlen(buf));
+    return;
+}
+
+void receive(rio_t *rp, char *buf) {
+    char body[MAXLINE];
+    Rio_readlineb(rp, body, MAXLINE);
+    sprintf(buf, "%s", body);
+    //while(strcmp(body, "\r\n")) {
+    //    Rio_readlineb(rp, body, MAXLINE);
+    //    sprintf(buf, "%s%s", buf, body);
+    //}
+    strcpy(buf, "ssss");
+    return;
+}
+
+void serve_post(int connectfd, char *buf, size_t size) {
+    sprintf(buf, "HTTP/1.0 200 OK\r\n");
+    sprintf(buf, "%sServer: Tiny Web Server\r\n", buf);
+    sprintf(buf, "%sContent-length: %d\r\n", buf, size);
+    sprintf(buf, "%sContent-type: %s\r\n\r\n", buf);
+    Rio_writen(connectfd, buf, strlen(buf));
+
+    Rio_writen(connectfd, buf, size);
+    return;
+}
+
 void read_requesthdrs(rio_t *rp) {
+    printf("Method: GET");
     char buf[MAXLINE];
     Rio_readlineb(rp, buf, MAXLINE);
     while(strcmp(buf, "\r\n")){
@@ -66,24 +127,30 @@ void read_requesthdrs(rio_t *rp) {
     return;
 }
 
-void parse_url(char *url, char *filename) {
+int parse_url(char *url, char *filename, char *cgiargs) {
+    char *p;
     memset(filename, '\0', sizeof(filename));
-    strcpy(filename, ".");
-    //strcpy(url, "/");
-    printf("url is %s", url);
-    if(strstr(url, "/favicon.ico")) {               //在访问根路径时会默认提交两次请求，一次为favicon.ico，将其屏蔽掉
-        return;
-    }
-    if (url[strlen(url)-1]=='/'){               //如果Url为根路径
-        strcat(filename, "/index.html");
+    if (!strstr(url, "cgi-bin")) {
+        strcpy(cgiargs, "");
+        strcpy(filename, ".");
+        strcat(filename, url);
+        if(url[strlen(url)-1] == "/") {
+            strcat(filename, "index.html");
+        }
+        return 1;
     }
     else {
+        p = index(url, '?');          //找到？首次出现
+        if (p) {
+            strcpy(cgiargs, p+1);
+            *p = '\0';
+        }
+        else                            //如果找不到？,则将其url按照静态处理
+            strcpy(cgiargs, "");
+        strcpy(filename, ".");
         strcat(filename, url);
+        return 0;
     }
-    printf("\n");
-    printf("filename is %s\n", filename);
-    printf("\n");
-    return;
 }
 
 void serve_static(int connectfd, char *filename, size_t size) {
@@ -103,8 +170,7 @@ void serve_static(int connectfd, char *filename, size_t size) {
     Munmap(srcp, size);
 }
 
-void get_filetype(char *filename, char *filetype)
-{
+void get_filetype(char *filename, char *filetype) {
     if (strstr(filename, ".html"))
         strcpy(filetype, "text/html");
     else if (strstr(filename, ".gif"))
@@ -115,11 +181,15 @@ void get_filetype(char *filename, char *filetype)
         strcpy(filetype, "text/plain");
 }
 
-void client_error(int connectfd, char *cause, char *errCode, char *errMsg) {
+void client_error(int connectfd, char *errCode, char *errMsg) {
+    printf("step in client\r\n");
     char buf[MAXBUF], body[MAXBUF];
     sprintf(body, "<html><title>Error</title></head>" );
+    printf("1\r\n");
     sprintf(body, "%s\n%s", errCode, errMsg);
-    sprintf(buf, "HTTP/1.0 %s %s\r\n", errno, errMsg);
+    printf("2\r\n");
+    sprintf(buf, "HTTP/1.0 %s %s\r\n", errCode, errMsg);
+    printf("3\r\n");
     Rio_writen(connectfd, buf, strlen(buf));
     sprintf(buf, "Content-type: text/html\r\n");
     Rio_writen(connectfd, buf, strlen(buf));
